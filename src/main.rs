@@ -1,3 +1,4 @@
+use std::env;
 use std::io::BufReader;
 use std::collections::HashMap;
 use xml::{
@@ -41,7 +42,12 @@ fn parse_element(name: OwnedName, attr: Vec<OwnedAttribute>, depth: usize) {
 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let resp = reqwest::blocking::get("https://feeds.simplecast.com/54nAGcIl")? // ny times rss
+    
+    let args: Vec<String> = env::args().collect();
+    println!("RSS feed from: {}", args.get(1)?);
+
+
+    let resp = reqwest::blocking::get(args.get(1)?)? // ny times rss: https://feeds.simplecast.com/54nAGcIl
     .text()?;
 
     let xml_parser = EventReader::from_str(resp.as_str());
@@ -50,6 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut reading_item: bool = false;    
     let mut title = String::new();
     let mut description = String::new();
+    let mut date = String::new();
     let mut url = String::new();
 
     // main parse loop, where the chaos happens
@@ -63,8 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match name.local_name.as_str() {
                     "title" => { state = ReaderState::title; }
                     "description" => { state = ReaderState::description; }
-                    "date" => { state = ReaderState::date; }
-                    "url" => { state = ReaderState::url; }
+                    "pubDate" => { state = ReaderState::date; }
+                    "link" => { state = ReaderState::url; }
                     "item" => { reading_item = true;}
                     _ => { state = ReaderState::irrelevant; }
                 }
@@ -81,32 +88,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ReaderState::summary => String::from("summary"),
                     ReaderState::irrelevant => String::from("irrelevant")
                 };
-                // println!("reader state: {}", reader_state_str);
+                 // println!("reader state: {}", reader_state_str);
             }
 
             // end of tag
             Ok(XmlEvent::EndElement { name, .. }) => {
                 state = ReaderState::irrelevant;
-                if (name.local_name.as_str() == "title") {
+                if (name.local_name.as_str() == "item") {
                     reading_item = false;
-                    items.push(rss_item{title: title.clone(), description: description.clone(), url: url.clone()});
+                    items.push(rss_item{title: title.clone(), date: date.clone(), description: description.clone(), url: url.clone()});
                 }
             }
 
             // text content inside tag
             Ok(XmlEvent::Characters(s)) => {
+                // println!("characters event");
                 if reading_item {
                     match state {
                         ReaderState::title => {
                             title = s.clone();
+                            // println!("content: {}", s);
                         }
                         ReaderState::description => {
                             description = s.clone();
+                            // println!("content: {}", s);
                         }
                         ReaderState::url => {
                             url = s.clone();
+                            // println!("content: {}", s);
                         }
                         ReaderState::date => {
+                            date = s.clone();
                         }
                         ReaderState::author => {
 
@@ -116,6 +128,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ReaderState::irrelevant => {}
                     }
+                }
+            }
+
+            Ok(XmlEvent::CData(s)) => {
+                match state {
+                    ReaderState::description => description = s.clone(),
+                    _ => {}
                 }
             }
             Err(e) => {
